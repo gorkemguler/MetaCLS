@@ -1,0 +1,29 @@
+MetaCLS Drop — macOS 14 or later
+
+1. Drag MetaCLS Drop.app to Applications.
+2. Open it from Applications.
+3. Drop PDF, Office, SVG or image files onto the window, or click Choose files.
+
+Files are cleaned IN PLACE: originals are overwritten. Keep a copy if needed.
+Nothing is uploaded. Python, pip, Homebrew and a separate ExifTool installation
+are not required. ExifTool uses macOS's built-in /usr/bin/perl.
+
+Community builds without an Apple Developer ID/notarization may be blocked on
+first launch. After trying to open the app, go to System Settings > Privacy &
+Security > Open Anyway, and confirm only if you trust this download.
+Do not disable Gatekeeper globally.
+
+Apple Silicon (M-series): choose the arm64 download.
+Intel Mac: choose the x86_64 download.
+
+Some legacy Office files require conversion with LibreOffice, which is not
+included. Unsupported files and cleaning errors appear in the results log.
+To uninstall, quit and remove MetaCLS Drop.app from Applications.
+
+Turkce:
+Uygulamayi Applications klasorune surukleyin ve acin. Python kurulumu gerekmez.
+Dosyalari pencereye birakin veya Choose files dugmesine basin.
+Orijinal dosyalarin uzerine yazilir. Gerekirse once bir kopyasini saklayin.
+Ilk acilista engellenirse: Sistem Ayarlari > Gizlilik ve Guvenlik > Yine de Ac.
+
+Source, releases and issues: https://github.com/gorkemguler/MetaCLS

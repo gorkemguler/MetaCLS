@@ -1,0 +1,4 @@
+pyinstaller==6.20.0
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+Pillow==12.3.0

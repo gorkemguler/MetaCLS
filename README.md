@@ -68,6 +68,20 @@ appearance, plus the `<xfa:data>` packet of an XFA form (the XFA template and sc
 
 ## Install
 
+### macOS desktop (no terminal required)
+
+Download **MetaCLS Drop** from [Releases](https://github.com/gorkemguler/MetaCLS/releases):
+choose `arm64` for Apple Silicon or `x86_64` for Intel (macOS 14+).
+Open the `.dmg`, drag the app to **Applications**, and open it.
+Drop files onto the window or click **Choose files…**. Python and ExifTool are included.
+**Originals are overwritten.** Keep a copy if needed.
+
+Community builds are not Apple-notarized. If blocked on first launch, open
+**System Settings → Privacy & Security → Open Anyway**.
+[Details and build instructions](platform/README.md#drop-window-metacls-dropapp).
+
+### Command line
+
 ```bash
 pip install metacls                     # core: PDF + Office scrubbing
 pip install 'metacls[api]'              # + the REST API service
