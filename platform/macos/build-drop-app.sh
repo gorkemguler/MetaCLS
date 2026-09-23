@@ -1,62 +1,59 @@
 #!/bin/bash
-# Build "MetaCLS Drop.app" — a persistent drag-and-drop window, the
-# macOS counterpart to platform/windows/MetaCLS-drop.ps1. Unlike
-# MetaCLS.app (build-app.sh), which is a zero-dependency AppleScript
-# droplet, this opens a real window you drop files onto and leave open;
-# it needs PyObjC, so this script sets that up in its own venv (not
-# your global Python) and wraps metacls_drop.py into the app bundle.
-#
-#   platform/macos/build-drop-app.sh [DEST_DIR]
-#
-# DEST_DIR defaults to /Applications if writable, else ~/Applications.
+# Build a portable windowed app, ZIP and drag-to-Applications DMG.
+# Requires a build environment only; the resulting app needs no Python/pip.
+# Usage: PYTHON=/path/to/python3 platform/macos/build-drop-app.sh [OUTPUT_DIR]
 set -euo pipefail
-
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/metacls_drop.py"
-
-dest="${1:-}"
-if [ -z "$dest" ]; then
-	if [ -w /Applications ]; then dest=/Applications; else dest="$HOME/Applications"; fi
+root="$(cd "$here/../.." && pwd)"
+cd "$root"
+python="${PYTHON:-python3}"
+dest="${1:-$root/dist/macos}"
+mkdir -p "$dest" build/vendor build/macos
+# Resolve before changing directories, including output paths with spaces.
+dest="$(cd "$dest" && pwd)"
+export PYINSTALLER_CONFIG_DIR="$root/build/pyinstaller-cache"
+version="$("$python" -c 'from importlib.metadata import version; print(version("metacls"))')"
+arch="$("$python" -c 'import platform; print(platform.machine())')"
+archive="$root/build/vendor/exiftool-13.59.tar.gz"
+if [ ! -f "$archive" ]; then
+    curl --fail --location --retry 3 \
+        https://github.com/exiftool/exiftool/archive/refs/tags/13.59.tar.gz -o "$archive"
 fi
-mkdir -p "$dest"
+printf '%s  %s\n' 87d3317882fdae9cb4dcfe57a96a378d0132ffc02c731315bf128b19ddcf7aac "$archive" | shasum -a 256 -c -
+tar -xzf "$archive" -C build/vendor
+# Avoid a dependency on a Homebrew Perl interpreter.
+"$python" -c 'from pathlib import Path; p=Path("build/vendor/exiftool-13.59/exiftool"); s=p.read_text(); p.write_text("#!/usr/bin/perl\n" + s.split("\n", 1)[1])'
+chmod +x build/vendor/exiftool-13.59/exiftool
+"$python" "$here/make-icon.py"
+"$python" "$here/collect-licenses.py" > build/macos/THIRD-PARTY-LICENSES.txt
+"$python" -m PyInstaller --noconfirm --clean --distpath "$dest" \
+    --workpath "$root/build/pyinstaller" "$here/MetaCLS.spec"
 app="$dest/MetaCLS Drop.app"
-
-venv_dir="$HOME/Library/Application Support/MetaCLS/drop-venv"
-if [ ! -x "$venv_dir/bin/python3" ]; then
-	echo "Setting up the drop window's Python environment (one-time, ~30s)..."
-	python3 -m venv "$venv_dir"
+codesign --verify --deep --strict "$app"
+"$python" "$here/smoke-test.py" "$app"
+base="MetaCLS-Drop-$version-macos-$arch"
+# A Developer ID signature is optional for local/community builds.
+# Set MACOS_NOTARY_PROFILE to a notarytool keychain profile to notarize.
+if [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+    : "${MACOS_CODESIGN_IDENTITY:?Notarization requires a Developer ID Application identity}"
+    ditto -c -k --sequesterRsrc --keepParent "$app" "$dest/notarize.zip"
+    xcrun notarytool submit "$dest/notarize.zip" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    xcrun stapler staple "$app"
+    rm "$dest/notarize.zip"
 fi
-"$venv_dir/bin/pip" install --quiet --upgrade pip pyobjc-framework-Cocoa
-
-rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$script" "$app/Contents/Resources/metacls_drop.py"
-
-cat > "$app/Contents/MacOS/MetaCLS Drop" <<LAUNCHER
-#!/bin/bash
-exec "$venv_dir/bin/python3" "\$(dirname "\$0")/../Resources/metacls_drop.py"
-LAUNCHER
-chmod +x "$app/Contents/MacOS/MetaCLS Drop"
-
-cat > "$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleName</key><string>MetaCLS Drop</string>
-  <key>CFBundleDisplayName</key><string>MetaCLS Drop</string>
-  <key>CFBundleIdentifier</key><string>com.gorkemguler.metacls.drop</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleExecutable</key><string>MetaCLS Drop</string>
-  <key>LSMinimumSystemVersion</key><string>10.13</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-</dict></plist>
-PLIST
-
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-	-f "$app" 2>/dev/null || true
-
-echo "Built '$app'"
-echo "Open it, then drop files onto the window to scrub them in place."
+ditto -c -k --sequesterRsrc --keepParent "$app" "$dest/$base.zip"
+stage="$(mktemp -d "$root/build/macos/dmg.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+ditto "$app" "$stage/MetaCLS Drop.app"
+ln -s /Applications "$stage/Applications"
+cp "$here/INSTALL.txt" "$stage/READ ME.txt"
+hdiutil create -volname "MetaCLS Drop" -srcfolder "$stage" -ov -format UDZO "$dest/$base.dmg"
+if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ]; then
+    codesign --sign "$MACOS_CODESIGN_IDENTITY" --timestamp "$dest/$base.dmg"
+fi
+if [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool submit "$dest/$base.dmg" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    xcrun stapler staple "$dest/$base.dmg"
+fi
+(cd "$dest" && shasum -a 256 "$base.dmg" "$base.zip" > "$base.sha256")
+echo "Built $dest/$base.dmg"

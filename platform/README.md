@@ -1,7 +1,7 @@
 # Platform integration
 
 Right-click, drop-target and drop-folder integration for MetaCLS.
-`metacls` must be installed and on `PATH` (`pip install metacls`,
+Except for the downloadable macOS windowed app, `metacls` must be installed and on `PATH` (`pip install metacls`,
 `pipx install metacls`, or a venv you add to `PATH`). Everything here
 scrubs **in place**: the originals are overwritten with the cleaned
 version.
@@ -21,17 +21,50 @@ it. Source: `MetaCLS-droplet.applescript`.
 
 ### Drop window: `MetaCLS Drop.app`
 
+Download the ready-to-run **DMG** from [GitHub Releases](https://github.com/gorkemguler/MetaCLS/releases).
+Choose `arm64` for Apple Silicon (M-series) or `x86_64` for Intel, open the
+DMG, and drag **MetaCLS Drop.app** to **Applications**. Requires macOS 14+.
+No Python, pip, Homebrew or separate MetaCLS/ExifTool installation is needed.
+Double-click the app for the persistent window; drop files or use **Choose files…**.
+The app also accepts files dropped onto its Finder/Dock icon. Files are cleaned
+in place, and results appear in the log without freezing the window.
+
+Community builds are ad-hoc signed, without Apple Developer ID/notarization.
+If macOS blocks the first launch, use **System Settings → Privacy & Security →
+Open Anyway** after attempting to open the downloaded app. See
+[Apple's instructions](https://support.apple.com/102445).
+
+Python, Cocoa bindings, the cleaning engine and ExifTool are bundled. ExifTool
+uses macOS's built-in `/usr/bin/perl`. LibreOffice is not included; some legacy
+Office files may still need conversion. The window supports the existing
+PDF / Office / SVG / image formats, not recursive archives or media mode.
+Delete the app to uninstall it. Old `drop-venv` installations are no longer used.
+
+#### Building and publishing
+
 ```bash
-platform/macos/build-drop-app.sh       # -> /Applications/MetaCLS Drop.app
+python3.12 -m venv .venv
+.venv/bin/python -m pip install . -r platform/macos/requirements-build.txt
+PYTHON="$PWD/.venv/bin/python" platform/macos/build-drop-app.sh
 ```
 
-The macOS counterpart to Windows' `MetaCLS-drop.ps1`: opens a real
-window you leave open and drop files onto, with a live results log,
-unlike `MetaCLS.app` above, which has no window and pops a file picker
-when double-clicked. Needs PyObjC, so the build script sets up its own
-venv (`~/Library/Application Support/MetaCLS/drop-venv`) rather than
-touching your global Python; that happens once, automatically. Delete
-the `.app` and the venv directory to remove it. Source: `metacls_drop.py`.
+Outputs go to `dist/macos/` (or an explicit output directory): `.app`, `.dmg`,
+`.zip` and SHA-256 checksums. Build separately on each architecture. The build
+verifies the downloaded ExifTool checksum, validates the app signature, and
+smoke-tests PDF, JPEG and Office cleaning with a system-only PATH. Dependency
+licenses are included under `Contents/Resources/licenses`.
+
+`.github/workflows/macos.yml` builds and tests both architectures for relevant
+pull requests. A `v*` tag attaches Mac downloads to the regular release; a
+`macos-v*` tag creates a desktop prerelease without triggering PyPI publishing.
+Manual workflow runs produce downloadable Actions artifacts.
+
+For Apple-signed distribution, install a Developer ID Application identity in
+the build machine's keychain, set `MACOS_CODESIGN_IDENTITY`, and set
+`MACOS_NOTARY_PROFILE` to an existing `xcrun notarytool store-credentials`
+keychain profile. The script signs, submits and staples the app and DMG before
+calculating checksums. GitHub's default builds remain ad-hoc signed until an
+Apple signing identity and notarization credentials are provisioned there.
 
 ### Finder Quick Action
 

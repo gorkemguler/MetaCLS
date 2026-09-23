@@ -9,16 +9,12 @@ Drop PDF / Office / image / SVG files onto the window and they're
 scrubbed IN PLACE with `metacls clean --in-place`; results show in the
 log below, newest at the bottom. Nothing leaves your machine.
 
-`metacls` must be installed and reachable (`pip install metacls` /
-`pipx install metacls`). Needs PyObjC (`pyobjc-framework-Cocoa`); see
-build-drop-app.sh, which sets that up in its own venv and wraps this
-script into "MetaCLS Drop.app" so you don't need to think about it.
+Download the self-contained app from GitHub Releases, or run this source
+with metacls and pyobjc-framework-Cocoa installed.
 """
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 import objc
 from AppKit import (
@@ -29,6 +25,7 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSBezelBorder,
     NSBezierPath,
+    NSButton,
     NSColor,
     NSDragOperationCopy,
     NSDragOperationNone,
@@ -37,6 +34,10 @@ from AppKit import (
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSMakeRect,
+    NSMenu,
+    NSMenuItem,
+    NSModalResponseOK,
+    NSOpenPanel,
     NSParagraphStyleAttributeName,
     NSRectFill,
     NSScrollView,
@@ -44,6 +45,7 @@ from AppKit import (
     NSTextView,
     NSView,
     NSViewHeightSizable,
+    NSViewMinYMargin,
     NSViewWidthSizable,
     NSWindow,
     NSWindowStyleMaskClosable,
@@ -51,6 +53,7 @@ from AppKit import (
     NSWindowStyleMaskResizable,
     NSWindowStyleMaskTitled,
 )
+from desktop_runtime import scrub_paths
 from Foundation import NSAttributedString, NSMakePoint, NSMutableParagraphStyle, NSObject
 from PyObjCTools import AppHelper
 
@@ -69,48 +72,6 @@ BAD = (0xF8 / 255, 0x71 / 255, 0x71 / 255)
 def _c(rgb, alpha=1.0):
     r, g, b = rgb
     return NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, alpha)
-
-
-def find_metacls() -> str | None:
-    env = os.environ.get("METACLS")
-    if env and shutil.which(env):
-        return env
-    found = shutil.which("metacls")
-    if found:
-        return found
-    for candidate in (
-        os.path.expanduser("~/.local/bin/metacls"),
-        "/opt/homebrew/bin/metacls",
-        "/usr/local/bin/metacls",
-    ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
-
-
-def scrub_paths(paths: list[str]) -> list[str]:
-    metacls = find_metacls()
-    if metacls is None:
-        return ["! metacls not found on PATH -- pip install metacls (or pipx install metacls)"]
-
-    lines = []
-    ok = fail = 0
-    for path in paths:
-        if not os.path.isfile(path):
-            continue
-        result = subprocess.run(
-            [metacls, "clean", path, "--in-place", "--yes", "--no-json-report", "--no-html-report"],
-            capture_output=True,
-        )
-        name = os.path.basename(path)
-        if result.returncode == 0:
-            ok += 1
-            lines.append(f"ok    {name}")
-        else:
-            fail += 1
-            lines.append(f"FAIL  {name}  (exit {result.returncode})")
-    lines.append(f"-- scrubbed {ok}, failed {fail} --")
-    return lines
 
 
 def _centered(text, font, color, rect):
@@ -199,7 +160,7 @@ class DropZoneView(NSView):
 
         _centered("Drag & drop to scrub", NSFont.boldSystemFontOfSize_(14), _c(INK),
                   NSMakeRect(0, 34, b.size.width, 20))
-        _centered("Scrubbed in place -- nothing else leaves this window.",
+        _centered("Originals are overwritten. Files stay on your Mac.",
                   NSFont.systemFontOfSize_(11), _c(DIM), NSMakeRect(0, 14, b.size.width, 16))
 
 
@@ -239,13 +200,21 @@ class RootView(NSView):
         paths = list(pasteboard.propertyListForType_(NSFilenamesPboardType) or [])
         if not paths:
             return False
-        self.window().delegate().appendResults_(scrub_paths(paths))
+        self.window().delegate().scrubPaths_(paths)
         return True
 
 
 class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        self.worker = ThreadPoolExecutor(max_workers=1)
+        menu = NSMenu.alloc().init()
+        app_item = NSMenuItem.alloc().init()
+        menu.addItem_(app_item)
+        app_menu = NSMenu.alloc().initWithTitle_("MetaCLS")
+        app_menu.addItemWithTitle_action_keyEquivalent_("Quit MetaCLS", "terminate:", "q")
+        menu.setSubmenu_forItem_(app_menu, app_item)
+        NSApp.setMainMenu_(menu)
 
         w, h = 600, 560
         rect = NSMakeRect(0, 0, w, h)
@@ -272,14 +241,22 @@ class AppDelegate(NSObject):
         self.window.setContentView_(content)
 
         header = BrandHeaderView.alloc().initWithFrame_(NSMakeRect(0, h - 70, w, 70))
-        header.setAutoresizingMask_(NSViewWidthSizable)
+        header.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         content.addSubview_(header)
 
         zone = DropZoneView.alloc().initWithFrame_(NSMakeRect(40, h - 70 - 220, w - 80, 200))
-        zone.setAutoresizingMask_(NSViewWidthSizable)
+        zone.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         content.addSubview_(zone)
 
-        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(20, 20, w - 40, h - 70 - 220 - 36))
+        choose = NSButton.alloc().initWithFrame_(NSMakeRect(w / 2 - 75, h - 322, 150, 26))
+        choose.setTitle_("Choose files…")
+        choose.setBezelStyle_(1)
+        choose.setTarget_(self)
+        choose.setAction_("chooseFiles:")
+        choose.setAutoresizingMask_(NSViewMinYMargin)
+        content.addSubview_(choose)
+
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(20, 20, w - 40, h - 70 - 220 - 66))
         scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         scroll.setHasVerticalScroller_(True)
         scroll.setBorderType_(NSBezelBorder)
@@ -303,6 +280,37 @@ class AppDelegate(NSObject):
 
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
+        for paths in getattr(self, "pending_paths", []):
+            self.scrubPaths_(paths)
+        self.pending_paths = []
+
+    def chooseFiles_(self, sender):
+        panel = NSOpenPanel.openPanel()
+        panel.setAllowsMultipleSelection_(True)
+        panel.setCanChooseDirectories_(False)
+        if panel.runModal() == NSModalResponseOK:
+            self.scrubPaths_([str(url.path()) for url in panel.URLs()])
+
+    def application_openFiles_(self, app, filenames):
+        paths = list(filenames)
+        if hasattr(self, "worker"):
+            self.scrubPaths_(paths)
+        else:
+            self.pending_paths = getattr(self, "pending_paths", []) + [paths]
+        app.replyToOpenOrPrint_(0)
+
+    def scrubPaths_(self, paths):
+        self.appendResults_([f"Queued {len(paths)} file(s)…"])
+        future = self.worker.submit(scrub_paths, list(paths))
+        future.add_done_callback(self._finished)
+
+    @objc.python_method
+    def _finished(self, future):
+        try:
+            lines = future.result()
+        except Exception as exc:
+            lines = [f"! Cleaning failed: {exc}"]
+        AppHelper.callAfter(self.appendResults_, lines)
 
     def appendResults_(self, lines):
         text = self.log.textStorage()

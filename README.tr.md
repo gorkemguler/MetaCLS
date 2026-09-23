@@ -68,6 +68,20 @@ görünümleri, artı bir XFA formunun `<xfa:data>` paketi (XFA şablonu ve şem
 
 ## Kurulum
 
+### macOS masaüstü (terminal gerekmez)
+
+[İndirilebilir sürümler](https://github.com/gorkemguler/MetaCLS/releases) sayfasından
+**MetaCLS Drop** paketini indirin: Apple Silicon için `arm64`, Intel için `x86_64`
+(macOS 14 ve üzeri). `.dmg` dosyasını açın, uygulamayı **Applications** klasörüne
+sürükleyin ve açın. Dosyaları pencereye bırakın veya **Choose files…** düğmesini kullanın.
+Python ve ExifTool pakete dahildir. **Orijinal dosyaların üzerine yazılır; gerekirse önce kopyalayın.**
+
+Topluluk paketlerinde Apple noter onayı yoktur. İlk açılış engellenirse
+**Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** yolunu kullanın.
+[Ayrıntılar ve derleme talimatları](platform/README.md#drop-window-metacls-dropapp).
+
+### Komut satırı
+
 ```bash
 pip install metacls                     # çekirdek: PDF + Office temizliği
 pip install 'metacls[api]'              # + REST API servisi
